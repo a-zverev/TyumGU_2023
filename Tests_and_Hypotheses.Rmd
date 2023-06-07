@@ -1,0 +1,255 @@
+---
+title: "Tests_and_Hypotheses"
+author: "Aleksei Zverev"
+date: "2023-06-05"
+output: html_document
+---
+
+```{r setup, include=TRUE, warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(fig.width = 10, fig.height = 6)
+ 
+library('phyloseq')
+library('tidyverse')
+library('vegan')
+
+
+
+set.seed(5678)
+setwd('~/Praktikum/TyumGU_2023/')
+ps <- readRDS("ps.no.organells.RData")
+
+# Select only samples with more than 8k reads per sample
+ps <- prune_samples(sample_sums(ps) > 8000, ps)
+ps
+```
+
+## Alpha-diversity
+
+```{r}
+# rarefy to minimal depth
+ps.raref <- rarefy_even_depth(ps)
+
+plot_richness(ps.raref, x = "MainPlant", measures=c("Observed", "Simpson"), color = "Soil")
+```
+
+Our suggestion: Observed ASV in the DP soil is lower, than in the BS soil. Lets test it.
+
+Make a table with desirable diversity index
+
+```{r}
+alpha_div <- function(ps, measures){
+  ps <- prune_taxa(taxa_sums(ps) > 0, ps)
+  obs_sim <- estimate_richness(ps, measures = measures)
+  Soil <- ps@sam_data$Soil
+  MainPlant <- ps@sam_data$MainPlant
+  alpha <- cbind(obs_sim, Soil, MainPlant)
+  return(alpha)
+}
+
+alpha <- alpha_div(ps.raref, c("Observed", "Simpson"))
+alpha
+```
+
+
+```{r}
+wilcox.test(Observed ~ Soil, data = alpha)
+```
+We are not really able to use two-way ANOVA (unweighted groups), but we'll try
+
+```{r}
+aov <- aov(Observed ~ Soil + MainPlant, data = alpha)
+summary(aov)
+# TukeyHSD(aov, conf.level=0.95)
+```
+
+No, there is no significant difference
+
+
+## Beta-diversity
+
+```{r}
+ps.prop <- transform_sample_counts(ps, function(x) x/sum(x))
+ord.pcoa.bray <- ordinate(ps.prop, method='PCoA', distance='bray')
+plot_ordination(ps.prop, ord.pcoa.bray, color = 'MainPlant', shape = "Soil") +
+    geom_point(size=3, alpha=0.7) + 
+    theme_light()
+
+```
+
+Our suggestion: DP and ChZ forms separate clusters (Rye is in even more separate)
+
+```{r}
+dist <- phyloseq::distance(ps, method = "bray")
+sample_df <- data.frame(sample_data(ps))
+ 
+permanova <- adonis2(dist ~ Soil + MainPlant, data = sample_df)
+permanova
+
+# Use pairwise adonis as a post-hoc test
+dp.only.ps <- subset_samples(ps, Soil == "DP")
+dp.only.dist <- phyloseq::distance(dp.only.ps, method = "bray")
+pairwiseAdonis::pairwise.adonis(dp.only.dist, dp.only.ps@sam_data$MainPlant)
+
+chz.only.ps <- subset_samples(ps, Soil == "ChZ")
+chz.only.dist <- phyloseq::distance(chz.only.ps, method = "bray")
+pairwiseAdonis::pairwise.adonis(chz.only.dist, chz.only.ps@sam_data$MainPlant)
+```
+
+Yep, our suggestion has been proved!
+
+## CCA
+
+How about the connection between nutritional factors and microbial populations?
+
+```{r}
+# Collapse samples according to nutrition data. Add nutrition data to metadata section
+ps@sam_data
+
+ps@sam_data$Samples <- paste(ps@sam_data$Soil, ps@sam_data$MainPlant, ps@sam_data$Spot, sep=".")
+ps.merged <- ps %>% merge_samples(group = "Samples")
+ps.merged@sam_data
+
+
+agro <- read.csv("agro.csv")
+rownames(agro) <- agro$SampleID
+agro
+
+if (all(rownames(agro) == rownames(ps.merged@sam_data))) {
+  ps.merged@sam_data <- sample_data(agro)
+  print("Replaced")
+}
+
+ps.merged@sam_data
+```
+
+Make CCA for the top 1000 most abundant ASVs
+
+```{r}
+veganifyOTU <- function(physeq){
+  require(phyloseq)
+  if(taxa_are_rows(physeq)){physeq <- t(physeq)}
+  return(as(otu_table(physeq), "matrix"))
+}
+
+ps.top1k <- names(sort(taxa_sums(ps.merged), decreasing = TRUE)[1:1000]) %>% 
+  prune_taxa(ps.merged)
+
+otus.ps.vegan <- veganifyOTU(ps.top1k)
+metadata <- as(sample_data(ps.top1k), "data.frame")
+
+
+
+
+vare.cca <- vegan::cca(otus.ps.vegan ~  pH + P + K + NH4, data=metadata)
+vare.cca
+```
+
+Check the CCA model
+
+```{r}
+anova(vare.cca)
+anova(vare.cca, by="terms")
+vif.cca(vare.cca)
+```
+Our model is valid with four predictors: two significant and two unsignificant. I want to keep both.
+
+```{r}
+# uncomment this, if you want to see inside the model for the ...
+
+# vare.cca$CCA$biplot # vectors
+# vare.cca$CCA$u # samples
+# vare.cca$CCA$v #ASVs
+```
+Ok, let's plot the data in two plots - for ASVs and for samples.
+
+First, we have to fortify the model by taxonomic and sample information
+
+```{r}
+species.data <- vare.cca$CCA$v %>% 
+               data.frame() %>% 
+               mutate(ASV = rownames(.)) %>% 
+               inner_join(data.frame(ASV = names(taxa_sums(ps.top1k)),
+                                     Total.abund = taxa_sums(ps.top1k),
+                                     ps.top1k@tax_table[,2], # Phylum
+                                     ps.top1k@tax_table[,3]), # Class
+                          by = "ASV")
+species.data %>% head(10)
+
+
+samples.data <- vare.cca$CCA$u %>% 
+  data.frame() %>% 
+  mutate(Names = rownames(.)) %>% 
+  inner_join(ps@sam_data, by = c("Names" = "Samples"))
+
+samples.data
+```
+
+
+```{r}
+# plot species
+ggplot() +
+  geom_point(data=species.data,
+             aes(x=CCA1, y=CCA2, color=Phylum, size=Total.abund), alpha=0.9) +
+  geom_segment(data = vare.cca$CCA$biplot %>% data.frame(), 
+               aes(x = 0, xend = CCA1, y = 0, yend = CCA2), 
+               alpha=0.8, color = "black",arrow = arrow(angle = 3)) +
+  geom_text(data = vare.cca$CCA$biplot %>% 
+                    data.frame() %>% 
+                    mutate(Label = rownames(.)), 
+            aes(x=CCA1, y=CCA2, label= Label,
+                hjust = -0.5), size=4) +
+  theme_light() +
+  ggtitle("A: Species")
+```
+
+Plot the same picture for different major (10 the most abundant) phyla
+
+```{r}
+major.phyla <- species.data %>% 
+  group_by(Phylum) %>% 
+  summarize(sum = sum(Total.abund)) %>% 
+  arrange(desc(sum)) %>% 
+  select(Phylum) %>% 
+  head(10) %>% 
+  as.vector()
+
+
+for (i in major.phyla$Phylum) {
+  p <- ggplot() +
+    geom_point(data=species.data,
+               aes(x=CCA1, y=CCA2, size=Total.abund), alpha=0.2, color="grey80") +
+    geom_point(data=species.data %>% filter(Phylum == i),
+               aes(x=CCA1, y=CCA2, color=Class, size=Total.abund), alpha=0.9) +
+    geom_segment(data = vare.cca$CCA$biplot %>% data.frame(), 
+                 aes(x = 0, xend = CCA1, y = 0, yend = CCA2), 
+                 alpha=0.8, color = "black",arrow = arrow(angle = 3)) +
+    geom_text(data = vare.cca$CCA$biplot %>% 
+                      data.frame() %>% 
+                      mutate(Label = rownames(.)), 
+              aes(x=CCA1, y=CCA2, label= Label,
+                  hjust = -0.5), size=4) +
+    theme_light() +
+    ggtitle(i)
+  print(p)
+}
+```
+
+
+
+```{r}
+# plot samples
+ggplot() +
+  geom_point(data=samples.data,
+             aes(x=CCA1, y=CCA2, color=MainPlant, shape = Soil), size=3, alpha=0.7) +
+  geom_segment(data = vare.cca$CCA$biplot %>% data.frame(), 
+               aes(x = 0, xend = CCA1, y = 0, yend = CCA2), 
+               alpha=0.8, color = "black",arrow = arrow(angle = 3)) +
+  geom_text(data = vare.cca$CCA$biplot %>% 
+                    data.frame() %>% 
+                    mutate(Label = rownames(.)), 
+            aes(x=CCA1, y=CCA2, label= Label,
+                hjust = -0.5), size=4) +
+  theme_light() +
+  ggtitle("B. Samples")
+```
+
