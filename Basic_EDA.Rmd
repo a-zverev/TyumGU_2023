@@ -47,6 +47,8 @@ asvs.keep <-ps@tax_table %>%
 ps.notrash <- prune_taxa(asvs.keep, ps.filtered)
 
 # ps.notrash@tax_table %>% View()
+
+saveRDS(ps.notrash, "ps.no.organells.RData")
 ```
 
 
@@ -115,6 +117,6 @@ plot_ordination(ps.notrash, ordinations, type="samples", color="MainPlant", shap
 
 ## Ideas to check
 
-1.
+1. 
 2.
 3.
