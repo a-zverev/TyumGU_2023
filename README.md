@@ -2,6 +2,8 @@
 
 Данные и презентации доступны на [Google Drive](https://drive.google.com/drive/folders/1hz8juRhOZ1xTNPb6A-U5zbF_8Fq5CYiG)
 
+Список тем на зачет доступен [здесь](/list_of_topics.md)
+
 ## Практика I:
 
 * Скачать данные по [ссылке](https://drive.google.com/file/d/1vdaeJkCUwSFO5bM2muL6Xeoajrg70JSo/)
