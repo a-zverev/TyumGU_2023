@@ -4,8 +4,11 @@
 
 Список тем на зачет доступен [здесь](/list_of_topics.md)
 
+<<<<<<< HEAD
 Отзыв о курсе можно оставить [тут](https://forms.gle/8NaUHWvh5KS7gNNd8) (анонимно)
 
+=======
+>>>>>>> a981975aaab51f3960262e2f045fb1d570eada11
 ## Практика I:
 
 * Скачать данные по [ссылке](https://drive.google.com/file/d/1vdaeJkCUwSFO5bM2muL6Xeoajrg70JSo/)
