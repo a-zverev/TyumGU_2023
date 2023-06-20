@@ -6,7 +6,6 @@
 
 Отзыв о курсе можно оставить [тут](https://forms.gle/8NaUHWvh5KS7gNNd8) (анонимно)
 
-
 ## Практика I:
 
 * Скачать данные по [ссылке](https://drive.google.com/file/d/1vdaeJkCUwSFO5bM2muL6Xeoajrg70JSo/)
